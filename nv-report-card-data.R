@@ -38,13 +38,9 @@ library(knitr)
 library(ggmap)
 
 
-## ----org-header----------------------------------------------------------
-hierarchy_header <- c('Cookie: sid=05116CCF8FFBB0648F2C7273580309964292E36AE33840C4FA0594FE6462CA195159FCF65C5A58FFB3DA8E23B57356DF02F16C41CA8040FDF361CAB2A13FDA3D1D821ACDAFEAF60561EB7E717D719D520AE7175ACE93E96595D8846FF2E5DF13AFE51350B46F17D186F9EAC2EA4A368508B36C84191D432D0646081FBC23EDE2',  'Accept-Encoding: gzip,deflate,sdch',  'Accept-Language: en-US,en;q=0.8',  'User-Agent: Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/32.0.1700.102 Safari/537.36',  'Accept: application/json, text/javascript, */*; q=0.01',  'Referer: http://www.nevadareportcard.com/di/main/assessment',  'X-Requested-With: XMLHttpRequest',  'Connection: keep-alive')
-
-
-## ----get_orgs, eval=FALSE------------------------------------------------
-## org_chart <- getURL('http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/OrganizationHierarchyTree?organization=64825', httpheader = hierarchy_header, encoding='gzip')
-## org <- fromJSON(org_chart, asText=TRUE)
+## ----get_orgs, cache=TRUE------------------------------------------------
+org_chart <- getURL('http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/OrganizationHierarchyTree?organization=64825', encoding='gzip')
+org <- fromJSON(org_chart, asText=TRUE)
 
 
 ## ----check-orgs----------------------------------------------------------
@@ -189,22 +185,22 @@ da.crt.g3.e <- getDiCSV(da.DT$id, scopestr, 'e1', csv_header, ethnicity = TRUE)
 kable(head(da.crt.g3.e), "html")
 
 
-## ----ayp-----------------------------------------------------------------
+## ----ayp, cache=TRUE-----------------------------------------------------
 all.ccsd.ayp.csv.txt <- getURL("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/rosterCSV?report=reportcard_1&organization=c5376&scope=e13.y1.y2.y3.y4.y5.y6.y7.y8.y9&scores=852,853,854")
 ccsd.ayp.DT <- data.table(read.csv(text = all.ccsd.ayp.csv.txt))
 
 
-## ----demographic---------------------------------------------------------
+## ----demographic, cache=TRUE---------------------------------------------
 all.ccsd.demo.csv.txt <- getURL('http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/rosterCSV?report=reportcard_1&organization=c5195&scope=e7.y1.y10.y2.y4.y5.y6.y7.y8.y9&scores=1026,566,567,568,569,570,571,572,573,574,575,805,576,577,806,586,587,588,589,578,579,580,581,582,583,584,585')
 ccsd.demo.DT <- data.table(read.csv(text = all.ccsd.demo.csv.txt))
 
 
-## ----personnel-----------------------------------------------------------
+## ----personnel, cache=TRUE-----------------------------------------------
 all.ccsd.pers.csv.txt <- getURL("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/rosterCSV?report=reportcard_1&organization=c5195&scope=e12.y1.y10.y2.y4.y5.y6.y7.y8.y9&scores=779,780,781,782,851,783,784,785,786,787,788,789,790,791,792,793,795,796,1029,797,798,799,800,801,802,803,760,761,762,856,763,765,767,769,771,764,766,768,770,772,775,773,777,776,774,778")
 ccsd.pers.DT <- data.table(read.csv(text = all.ccsd.pers.csv.txt))
 
 
-## ----tech----------------------------------------------------------------
+## ----tech, cache=TRUE----------------------------------------------------
 ccsd.tech2011.csv <- getURL("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/rosterCSV?report=reportcard_1&organization=c5195&scope=e17.y1.y2.y3.y4.y5.y6&scores=590,591,592,593,594,595")
 ccsd.tech2012.csv <- getURL("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/rosterCSV?report=reportcard_1&organization=c5195&scope=e8.y10.y7&scores=809,810,811,812,813,814,815")
 ccsd.tech.DT <- data.table(rbind.fill(read.csv(text = ccsd.tech2011.csv), read.csv(text = ccsd.tech2012.csv)))
@@ -236,7 +232,7 @@ getProfiles <- function(org) {
 }
 
 
-## ----getProfiles---------------------------------------------------------
+## ----getProfiles, cache=TRUE---------------------------------------------
 valley.prof.list <- getProfiles(da.DT["Valley HS"]$id)
 
 
@@ -245,7 +241,7 @@ valley.prof.list <- getProfiles(da.DT["Valley HS"]$id)
 table(sapply(valley.prof.list, function(x) x$superintendent))
 
 
-## ----toyExample-geocoding------------------------------------------------
+## ----toyExample-geocoding, message=FALSE, cache=TRUE---------------------
  # Geocoding
 valley.address <- paste(valley.prof.list$y1$address, valley.prof.list$y1$zip)
 valley.address
@@ -253,7 +249,7 @@ valley.latlong <- geocode(valley.address)
 
 
 
-## ----toyExample-osm------------------------------------------------------
+## ----toyExample-os, fig.cap='Area near Valley HS', message=FALSE, cache=TRUE----
 sta <- get_map(location = c(lon = valley.latlong$lon, lat = valley.latlong$lat),
                zoom = 15, 
                crop = TRUE,
@@ -262,7 +258,7 @@ sta <- get_map(location = c(lon = valley.latlong$lon, lat = valley.latlong$lat),
 ggmap(sta)
 
 
-## ----toyExample-crime----------------------------------------------------
+## ----toyExample-crime, cache=TRUE----------------------------------------
 
 crimes <- getURL("http://www.crimemapping.com/GetIncidents.aspx?db=8/28/2013+00:00:00&de=2/03/2014+23:59:00&ccs=AR,AS,BU,DP,DR,DU,FR,HO,VT,RO,SX,TH,VA,VB,WE&add=2839%20Burnham%20Ave%2C%20Las%20Vegas%2C%20Nevada%2C%2089169&bcy=4319584.042143912&bcx=-12815448.676366305&br=1.0&xmin=-12818038.894702934&ymin=4318442.044425546&xmax=-12813524.33271972&ymax=4321389.647328871")
 
@@ -271,24 +267,23 @@ crimes <- fromJSON(crimes)
 table(sapply(crimes$incidents, function (x) x$CrimeCode))
 
 
-## ------------------------------------------------------------------------
+## ----getDSKcensus--------------------------------------------------------
 dsk <- getURL('http://www.datasciencetoolkit.org/coordinates2statistics/36.13727%2c-115.1217')
 dsk <- fromJSON(dsk)
 
 
-## ------------------------------------------------------------------------
+## ----dsk-poverty---------------------------------------------------------
 dsk[[1]]$statistics$us_population_poverty
 dsk[[1]]$statistics$us_population_low_income
 
 
-## ------------------------------------------------------------------------
+## ----dsk-murphy-brown----------------------------------------------------
 dsk[[1]]$statistics$us_households_single_mothers
 dsk[[1]]$statistics$us_sample_area
 
 
 ## ----housekeeping--------------------------------------------------------
-save.image("nv-report-card-data.RData")
-
+save.image(file = "nv-report-card-data.RData", ascii = TRUE)
 sessionInfo()
 
 
