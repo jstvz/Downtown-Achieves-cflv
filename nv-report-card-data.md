@@ -4,56 +4,50 @@
 NV Report Card Data
 ========================================================
 
-Shawn sent around some data pulled from [Nevada Report Card](http://www.nevadareportcard.com). 
-He mentioned that the test results weren't available on the NRC site. We will find another way.
+Last week, Shawn Looker sent around some data pulled from 
+[Nevada Report Card](http://www.nevadareportcard.com). Because we'll get the bulk
+of our data from there, I took a look at what was available.
 
-## Introduction
+Obviously, not everyone will want to wade through an R script, so you can skip to the end for
+for a toy example.
+
+## Preliminaries
+
+We'll make use of the following libraries in this script:
+
 
 ```r
-library(RCurl) # Parsing Excel files
+library(RCurl) 
 library(RJSONIO)
-library(plyr)         # libxml for parsing HTML 
+library(plyr)          
 library(data.table)
 library(stringr)
 library(knitr)
+library(ggmap)
 ```
 
 
-## Scraping cohort exam data
+## Getting cohort exam data
+
+Standardized test results are our primary goal. In order to access the data, we'll need
+to examine the DI API to determine the most efficient way to proceed.
+
 ### Getting our bearings
 
-Making use of [`RCurl`]()
-
-```bash
-curl 'http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/OrganizationHierarchyTree?organization=64825' -H 'Cookie: sid=05116CCF8FFBB0648F2C7273580309964292E36AE33840C4FA0594FE6462CA195159FCF65C5A58FFB3DA8E23B57356DF02F16C41CA8040FDF361CAB2A13FDA3D1D821ACDAFEAF60561EB7E717D719D520AE7175ACE93E96595D8846FF2E5DF13AFE51350B46F17D186F9EAC2EA4A368508B36C84191D432D0646081FBC23EDE2' -H 'Accept-Encoding: gzip,deflate,sdch' -H 'Accept-Language: en-US,en;q=0.8' -H 'User-Agent: Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/32.0.1700.102 Safari/537.36' -H 'Accept: application/json, text/javascript, */*; q=0.01' -H 'Referer: http://www.nevadareportcard.com/di/main/assessment' -H 'X-Requested-With: XMLHttpRequest' -H 'Connection: keep-alive' --compressed
-```
-
-Using `%s/ -H/, /g`, we get the following
-
-
-```r
-hierarchy_header <- c("Cookie: sid=05116CCF8FFBB0648F2C7273580309964292E36AE33840C4FA0594FE6462CA195159FCF65C5A58FFB3DA8E23B57356DF02F16C41CA8040FDF361CAB2A13FDA3D1D821ACDAFEAF60561EB7E717D719D520AE7175ACE93E96595D8846FF2E5DF13AFE51350B46F17D186F9EAC2EA4A368508B36C84191D432D0646081FBC23EDE2", 
-    "Accept-Encoding: gzip,deflate,sdch", "Accept-Language: en-US,en;q=0.8", 
-    "User-Agent: Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/32.0.1700.102 Safari/537.36", 
-    "Accept: application/json, text/javascript, */*; q=0.01", 
-    "Referer: http://www.nevadareportcard.com/di/main/assessment", 
-    "X-Requested-With: XMLHttpRequest", "Connection: keep-alive")
-```
-
+Begin by getting the Organization Hierarchy in order to get a list of all schools
+in CCSD:
 
 
 ```r
 org_chart <- getURL("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/OrganizationHierarchyTree?organization=64825", 
-    httpheader = hierarchy_header, encoding = "gzip")
+    encoding = "gzip")
 org <- fromJSON(org_chart, asText = TRUE)
 ```
 
 
-
-
-
 ### Extracting Clark
-We expect that counties will be at the second node of our tree. Verify by visual inspection:
+
+We expect that the counties will be at the second node of our tree. Verify:
 
 
 ```r
@@ -80,47 +74,32 @@ org$children[[2]]$organization$name
 ```
 
 
-So the second node is our target. We can infer the meaning of each type:
+Clark County is our subject. From visual inspection We can infer the
+meaning of each `type`:
 
 
 ```r
-head(unlist(org), n = 15)
+head(unlist(org), n = 10)
 ```
 
 ```
-##                   organization.id            organization.parent_id 
-##                           "64825"                              "-1" 
-##                 organization.code                 organization.name 
-##                              "00"                           "State" 
-##                 organization.type                 organization.demo 
-##                               "S"                           "FALSE" 
-##                 organization.home          children.organization.id 
-##                            "TRUE"                           "64826" 
-##   children.organization.parent_id        children.organization.code 
-##                           "64825"                              "01" 
-##        children.organization.name        children.organization.type 
-##                       "Churchill"                               "D" 
-##        children.organization.demo        children.organization.home 
-##                           "FALSE"                           "FALSE" 
-## children.children.organization.id 
-##                           "64844"
+##                 organization.id          organization.parent_id 
+##                         "64825"                            "-1" 
+##               organization.code               organization.name 
+##                            "00"                         "State" 
+##               organization.type               organization.demo 
+##                             "S"                         "FALSE" 
+##               organization.home        children.organization.id 
+##                          "TRUE"                         "64826" 
+## children.organization.parent_id      children.organization.code 
+##                         "64825"                            "01"
 ```
 
 ```r
-tail(unlist(org), n = 15)
+tail(unlist(org), n = 10)
 ```
 
 ```
-##      children.children.organization.home 
-##                                  "FALSE" 
-##        children.children.organization.id 
-##                                  "65526" 
-## children.children.organization.parent_id 
-##                                  "64843" 
-##      children.children.organization.code 
-##                                  "18424" 
-##      children.children.organization.name 
-##           "Honors Academy of Literature" 
 ##      children.children.organization.type 
 ##                                      "B" 
 ##      children.children.organization.demo 
@@ -144,8 +123,9 @@ tail(unlist(org), n = 15)
 ```
 
 
-Note the first `organization.id`, `64825`, which is the same as our `GET` request.
-From the rest we can infer that `S` = State, `D` = District, and `B` = School. We assume that `A` and `C` are not used. Checking:
+Note the first `organization.id`, `64825`, which is the same as our `GET`
+request. From the rest we can infer that `S` = State, `D` = District, and `B` =
+School. We assume that `A` and `C` are not used. Checking:
 
 
 ```r
@@ -186,9 +166,8 @@ ccsd.DT <- data.table(ccsd.DT, key = c("name", "id"))
 ### Extracting subjects
 
 We now have CCSD isolated, we can pull the info for our Downtown Achieves cohort.
-While this script can be modified to download and parse AYP reports for an arbitrary subset of
-Nevada schools, we are limiting ourselves to collecting data for the following 
-schools:
+This script can be modified for an arbitrary subset of schools, here we are collecting
+data for the following schools:
 
 
 ```r
@@ -202,7 +181,7 @@ da_list <- list(
 ```
 
 
-Because we may want to consider each pipeline seperately, we also create two character 
+Because we may want to consider each pipeline separately, we also create two character 
 vectors to hold their names:
 
 
@@ -228,11 +207,13 @@ da_pipeline_2
 ```
 
 
-We'll select rows frow our `ccsd.DT` data table by passing it our list of names:
+We'll select rows from our `ccsd.DT` data table by passing it our list of names
+as keys:
 
 
 ```r
 da.DT <- ccsd.DT[unlist(da_list)]
+setkeyv(da.DT, c("name", "id"))
 ```
 
 
@@ -250,64 +231,10 @@ da.DT <- ccsd.DT[unlist(da_list)]
  </thead>
 <tbody>
   <tr>
-   <td> Hollingsworth ES </td>
-   <td> 65053 </td>
-   <td> 64827 </td>
-   <td> 02273 </td>
-   <td> B </td>
-   <td> FALSE </td>
-   <td> FALSE </td>
-  </tr>
-  <tr>
    <td> Crestwood ES </td>
    <td> 64985 </td>
    <td> 64827 </td>
    <td> 02205 </td>
-   <td> B </td>
-   <td> FALSE </td>
-   <td> FALSE </td>
-  </tr>
-  <tr>
-   <td> Lake ES </td>
-   <td> 65017 </td>
-   <td> 64827 </td>
-   <td> 02237 </td>
-   <td> B </td>
-   <td> FALSE </td>
-   <td> FALSE </td>
-  </tr>
-  <tr>
-   <td> Park ES </td>
-   <td> 64996 </td>
-   <td> 64827 </td>
-   <td> 02216 </td>
-   <td> B </td>
-   <td> FALSE </td>
-   <td> FALSE </td>
-  </tr>
-  <tr>
-   <td> Fyfe ES </td>
-   <td> 65020 </td>
-   <td> 64827 </td>
-   <td> 02240 </td>
-   <td> B </td>
-   <td> FALSE </td>
-   <td> FALSE </td>
-  </tr>
-  <tr>
-   <td> McWilliams ES </td>
-   <td> 64998 </td>
-   <td> 64827 </td>
-   <td> 02218 </td>
-   <td> B </td>
-   <td> FALSE </td>
-   <td> FALSE </td>
-  </tr>
-  <tr>
-   <td> Twin Lakes ES </td>
-   <td> 65023 </td>
-   <td> 64827 </td>
-   <td> 02243 </td>
    <td> B </td>
    <td> FALSE </td>
    <td> FALSE </td>
@@ -322,10 +249,64 @@ da.DT <- ccsd.DT[unlist(da_list)]
    <td> FALSE </td>
   </tr>
   <tr>
+   <td> Fyfe ES </td>
+   <td> 65020 </td>
+   <td> 64827 </td>
+   <td> 02240 </td>
+   <td> B </td>
+   <td> FALSE </td>
+   <td> FALSE </td>
+  </tr>
+  <tr>
    <td> Gibson (Robert) MS </td>
    <td> 65090 </td>
    <td> 64827 </td>
    <td> 02310 </td>
+   <td> B </td>
+   <td> FALSE </td>
+   <td> FALSE </td>
+  </tr>
+  <tr>
+   <td> Hollingsworth ES </td>
+   <td> 65053 </td>
+   <td> 64827 </td>
+   <td> 02273 </td>
+   <td> B </td>
+   <td> FALSE </td>
+   <td> FALSE </td>
+  </tr>
+  <tr>
+   <td> Lake ES </td>
+   <td> 65017 </td>
+   <td> 64827 </td>
+   <td> 02237 </td>
+   <td> B </td>
+   <td> FALSE </td>
+   <td> FALSE </td>
+  </tr>
+  <tr>
+   <td> McWilliams ES </td>
+   <td> 64998 </td>
+   <td> 64827 </td>
+   <td> 02218 </td>
+   <td> B </td>
+   <td> FALSE </td>
+   <td> FALSE </td>
+  </tr>
+  <tr>
+   <td> Park ES </td>
+   <td> 64996 </td>
+   <td> 64827 </td>
+   <td> 02216 </td>
+   <td> B </td>
+   <td> FALSE </td>
+   <td> FALSE </td>
+  </tr>
+  <tr>
+   <td> Twin Lakes ES </td>
+   <td> 65023 </td>
+   <td> 64827 </td>
+   <td> 02243 </td>
    <td> B </td>
    <td> FALSE </td>
    <td> FALSE </td>
@@ -386,6 +367,7 @@ rg
 
 Inspection of the URL used to download the CRT scores for another group shows:
 
+
 ```r
 getFormParams("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/summaryCSV?report=summary_1&organization=c2272&scope=e5.g3.y10&scores=N_MA,MA_pass,MA_AMO,MA_level,N_RD,RD_pass,RD_AMO,RD_level")
 ```
@@ -407,12 +389,12 @@ The `organization` parameter is the hash generated by `getOrgCollnHash()`. The
 
   1. `en`, where *n* is 1, 2, 5, or 6,
   2. `gn`, where *n* is grade number,
-  3. `yn`, where *n* is year post NCLB, ranging from 1 (2003) to 10 (2012)
+  3. `yn`, where *n* is year post-NCLB, ranging from 1 (2003) to 10 (2012)
 
 (These variables, and others, can also be described programmatically via the API)
 
 The set of scores available for each test vary, and will need to be specified for each
-one. We include them in our retreival function, but these can also be edited to narrow
+exam. We hard code them in our retrieval function, but these can easily be edited to narrow
 the query to specific variables. 
 
  1. `e1`, years 3:10; grades 3:8; CRT
@@ -479,7 +461,7 @@ getDiCSV <- function(org, scope, exam, header, ethnicity = FALSE,
 ```
 
 
-Now we'll download the results of the Criteron Referenced Test (exam `e1`) for Grade 3 (`g3`), and years
+Now we'll download the results of the Criterion Referenced Test (exam `e1`) for Grade 3 (`g3`), and years
 2007 (`y3`) through 2012 (`y10`):
 
 
@@ -489,12 +471,8 @@ da.crt.g3 <- getDiCSV(da.DT$id, scopestr, "e1", csv_header)
 ```
 
 
-Printing the first ten rows:
-<script type="text/javascript" charset="utf-8">
-  $(document).ready(function() {
-  	$('#da_table').dataTable();
-	} );
-</script>
+Printing the first six rows:
+
 <table id="da_table">
  <thead>
   <tr>
@@ -657,7 +635,7 @@ Printing the first ten rows:
 </table>
 
 
-Try again, but this time disaggregate based upon ethnicity:
+Try again, but this time dis-aggregate based upon ethnicity:
 
 
 ```r
@@ -666,7 +644,7 @@ da.crt.g3.e <- getDiCSV(da.DT$id, scopestr, "e1", csv_header,
 ```
 
 
-The first 10 rows:
+The first six rows:
 
 <table>
  <thead>
@@ -830,19 +808,298 @@ The first 10 rows:
 </table>
 
 
-However, disaggregation has its pitfalls, as test results are supressed where $n\le20$
+As we can see, dis-aggregation has its pitfalls: test results are suppressed for
+any group where $n\le20$ 
+
+From here, one can filter for complete cases, reshape data, tabulate, etc.
+Next, an overview of the non-assessment data on NRC.
+
+## Getting NRC data
 
 ### Accessing demographic and profile data
 
-Test scores, in isolation,  are removed from their context and are of limited
-utility. 
+Test scores alone are of limited value. Additional context is provided by
+several addditional datasets on NRC. 
+
+#### Adequate Yearly Progress
+
+
+```r
+all.ccsd.ayp.csv.txt <- getURL("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/rosterCSV?report=reportcard_1&organization=c5376&scope=e13.y1.y2.y3.y4.y5.y6.y7.y8.y9&scores=852,853,854")
+ccsd.ayp.DT <- data.table(read.csv(text = all.ccsd.ayp.csv.txt))
+```
+
+
+#### Demographics
+Download all count and percentage demographic data:
+
+
+```r
+all.ccsd.demo.csv.txt <- getURL("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/rosterCSV?report=reportcard_1&organization=c5195&scope=e7.y1.y10.y2.y4.y5.y6.y7.y8.y9&scores=1026,566,567,568,569,570,571,572,573,574,575,805,576,577,806,586,587,588,589,578,579,580,581,582,583,584,585")
+ccsd.demo.DT <- data.table(read.csv(text = all.ccsd.demo.csv.txt))
+```
+
+
+#### Personnel
+
+Download all personnel data (e.g., % of highly qualified teachers):
+
+
+```r
+all.ccsd.pers.csv.txt <- getURL("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/rosterCSV?report=reportcard_1&organization=c5195&scope=e12.y1.y10.y2.y4.y5.y6.y7.y8.y9&scores=779,780,781,782,851,783,784,785,786,787,788,789,790,791,792,793,795,796,1029,797,798,799,800,801,802,803,760,761,762,856,763,765,767,769,771,764,766,768,770,772,775,773,777,776,774,778")
+ccsd.pers.DT <- data.table(read.csv(text = all.ccsd.pers.csv.txt))
+```
+
+
+#### Technology
+
+Download all Technology data:
+
+```r
+ccsd.tech2011.csv <- getURL("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/rosterCSV?report=reportcard_1&organization=c5195&scope=e17.y1.y2.y3.y4.y5.y6&scores=590,591,592,593,594,595")
+ccsd.tech2012.csv <- getURL("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/rosterCSV?report=reportcard_1&organization=c5195&scope=e8.y10.y7&scores=809,810,811,812,813,814,815")
+ccsd.tech.DT <- data.table(rbind.fill(read.csv(text = ccsd.tech2011.csv), 
+    read.csv(text = ccsd.tech2012.csv)))
+```
+
+
+### Historical profiles
+
+Historical profiles are analogous to metadata for each school year. These include the name
+of each school's principal, addresses, phone numbers,  and names of school board
+members and more. Also included are goals, such as the "percent[age] of
+non-proficient math students in the Class of 2006 will be reduced by at least
+50%." ([Advanced Technologies Academy](http://www.atech.org/), 2005) 
+
+
+```r
+
+getProfiles <- function(org) {
+    years <- paste0("y", 1:10)
+    
+    # Create a list of lists containing searches for each
+    # year
+    searches <- lapply(years, function(x) structure(c("profile_1", 
+        "profile", x, org), .Names = c("report", "reportID", 
+        "scope", "organization")))
+    prof.json.lst <- lapply(searches, function(search) {
+        getForm("http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/Profile", 
+            .params = search, .opts = (httpheader = "Accept: application/json, text/javascript, */*; q=0.01"))
+    })
+    prof.list <- lapply(prof.json.lst, fromJSON)
+    names(prof.list) <- years
+    prof.list
+}
+```
 
 
 
+## Example
+
+This is already far too long, but I want to shoehorn in a few applications. 
+We'll download the profiles of Valley High School, one of our DA schools:
+
+
+```r
+valley.prof.list <- getProfiles(da.DT["Valley HS"]$id)
+```
+
+
+### Principal turnover
+
+How many principals has Valley had in the last decade?
+
+
+```r
+# Finding principals
+table(sapply(valley.prof.list, function(x) x$superintendent))
+```
+
+```
+## 
+## Deann R. Burnett, Principal      Ron Montoya, Principal 
+##                           2                           8
+```
+
+
+### Geocoding
+
+We can geocode Valley's address:
+
+
+```r
+# Geocoding
+valley.address <- paste(valley.prof.list$y1$address, valley.prof.list$y1$zip)
+valley.address
+```
+
+```
+## [1] "2839 S Burnham Ave 89109"
+```
+
+```r
+valley.latlong <- geocode(valley.address)
+```
+
+
+then map the surrounding area:
+
+
+```r
+sta <- get_map(location = c(lon = valley.latlong$lon, lat = valley.latlong$lat), 
+    zoom = 15, crop = TRUE, source = "stamen")
+ggmap(sta)
+```
+
+![Area near Valley HS](figure/toyExample-os.png) 
 
 
 
+### Other data sources
 
+What crimes have been reported within a one mile radius since 28 August 2013?
+
+
+```r
+
+crimes <- getURL("http://www.crimemapping.com/GetIncidents.aspx?db=8/28/2013+00:00:00&de=2/03/2014+23:59:00&ccs=AR,AS,BU,DP,DR,DU,FR,HO,VT,RO,SX,TH,VA,VB,WE&add=2839%20Burnham%20Ave%2C%20Las%20Vegas%2C%20Nevada%2C%2089169&bcy=4319584.042143912&bcx=-12815448.676366305&br=1.0&xmin=-12818038.894702934&ymin=4318442.044425546&xmax=-12813524.33271972&ymax=4321389.647328871")
+
+crimes <- fromJSON(crimes)
+
+table(sapply(crimes$incidents, function(x) x$CrimeCode))
+```
+
+```
+## 
+##              Assault             Burglary Disturbing the Peace 
+##                   41                  152                  153 
+##  Motor Vehicle Theft              Robbery           Sex Crimes 
+##                   79                   21                    1 
+##        Theft/Larceny            Vandalism              Weapons 
+##                    1                   50                    7
+```
+
+
+We can also get additional data about the people who live there:
+
+
+```r
+dsk <- getURL("http://www.datasciencetoolkit.org/coordinates2statistics/36.13727%2c-115.1217")
+dsk <- fromJSON(dsk)
+```
+
+
+
+```r
+dsk[[1]]$statistics$us_population_poverty
+```
+
+```
+## $description
+## [1] "The proportion of residents whose income is below the poverty level"
+## 
+## $value
+## [1] 0.1067
+## 
+## $proportion_of
+## [1] 1818
+## 
+## $source_name
+## [1] "US Census and the CGIAR Consortium for Spatial Information"
+```
+
+```r
+dsk[[1]]$statistics$us_population_low_income
+```
+
+```
+## $description
+## [1] "The proportion of residents who earn less than twice the poverty level"
+## 
+## $value
+## [1] 0.2536
+## 
+## $proportion_of
+## [1] 1818
+## 
+## $source_name
+## NULL
+```
+
+
+
+```r
+dsk[[1]]$statistics$us_households_single_mothers
+```
+
+```
+## $description
+## [1] "The proportion of households with a female householder, no husband, and one or more children under eighteen."
+## 
+## $value
+## [1] 0.07375
+## 
+## $proportion_of
+## [1] 678
+## 
+## $source_name
+## [1] "US Census and the CGIAR Consortium for Spatial Information"
+```
+
+```r
+dsk[[1]]$statistics$us_sample_area
+```
+
+```
+## $description
+## [1] "The total area of the grid cell US Census samples were calculated on."
+## 
+## $value
+## [1] 693096
+## 
+## $units
+## [1] "square meters"
+## 
+## $source_name
+## [1] "US Census and the CGIAR Consortium for Spatial Information"
+```
+
+
+
+```r
+save.image(file = "nv-report-card-data.RData", ascii = TRUE)
+sessionInfo()
+```
+
+```
+## R version 3.0.2 (2013-09-25)
+## Platform: i686-pc-linux-gnu (32-bit)
+## 
+## locale:
+##  [1] LC_CTYPE=en_US.UTF-8       LC_NUMERIC=C              
+##  [3] LC_TIME=en_US.UTF-8        LC_COLLATE=en_US.UTF-8    
+##  [5] LC_MONETARY=en_US.UTF-8    LC_MESSAGES=en_US.UTF-8   
+##  [7] LC_PAPER=en_US.UTF-8       LC_NAME=C                 
+##  [9] LC_ADDRESS=C               LC_TELEPHONE=C            
+## [11] LC_MEASUREMENT=en_US.UTF-8 LC_IDENTIFICATION=C       
+## 
+## attached base packages:
+## [1] stats     graphics  grDevices utils     datasets  methods   base     
+## 
+## other attached packages:
+## [1] ggmap_2.3         ggplot2_0.9.3.1   stringr_0.6.2     data.table_1.8.10
+## [5] plyr_1.8          RJSONIO_1.0-3     RCurl_1.95-4.1    bitops_1.0-6     
+## [9] knitr_1.5        
+## 
+## loaded via a namespace (and not attached):
+##  [1] colorspace_1.2-4    dichromat_2.0-0     digest_0.6.4       
+##  [4] evaluate_0.5.1      formatR_0.10        grid_3.0.2         
+##  [7] gtable_0.1.2        labeling_0.2        mapproj_1.2-2      
+## [10] maps_2.3-6          MASS_7.3-29         munsell_0.4.2      
+## [13] png_0.1-7           proto_0.3-10        RColorBrewer_1.0-5 
+## [16] reshape2_1.2.2      RgoogleMaps_1.2.0.5 rjson_0.2.13       
+## [19] scales_0.2.3        tools_3.0.2
+```
 
 
 
