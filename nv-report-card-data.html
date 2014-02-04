@@ -1,0 +1,1449 @@
+<h1 id="nv-report-card-data">NV Report Card Data</h1>
+<p>Shawn sent around some data pulled from <a href="http://www.nevadareportcard.com">Nevada Report Card</a>. He mentioned that the test results weren't available on the NRC site. We will find another way.</p>
+<h2 id="introduction">Introduction</h2>
+<pre class="sourceCode r"><code class="sourceCode r"><span class="kw">library</span>(RCurl) <span class="co"># Parsing Excel files</span>
+<span class="kw">library</span>(RJSONIO)
+<span class="kw">library</span>(plyr)         <span class="co"># libxml for parsing HTML </span>
+<span class="kw">library</span>(data.table)
+<span class="kw">library</span>(stringr)
+<span class="kw">library</span>(knitr)</code></pre>
+<h2 id="scraping-cohort-exam-data">Scraping cohort exam data</h2>
+<h3 id="getting-our-bearings">Getting our bearings</h3>
+<p>Making use of <a href=""><code>RCurl</code></a></p>
+<pre class="sourceCode bash"><code class="sourceCode bash"><span class="kw">curl</span> <span class="st">&#39;http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/OrganizationHierarchyTree?organization=64825&#39;</span> -H <span class="st">&#39;Cookie: sid=05116CCF8FFBB0648F2C7273580309964292E36AE33840C4FA0594FE6462CA195159FCF65C5A58FFB3DA8E23B57356DF02F16C41CA8040FDF361CAB2A13FDA3D1D821ACDAFEAF60561EB7E717D719D520AE7175ACE93E96595D8846FF2E5DF13AFE51350B46F17D186F9EAC2EA4A368508B36C84191D432D0646081FBC23EDE2&#39;</span> -H <span class="st">&#39;Accept-Encoding: gzip,deflate,sdch&#39;</span> -H <span class="st">&#39;Accept-Language: en-US,en;q=0.8&#39;</span> -H <span class="st">&#39;User-Agent: Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/32.0.1700.102 Safari/537.36&#39;</span> -H <span class="st">&#39;Accept: application/json, text/javascript, */*; q=0.01&#39;</span> -H <span class="st">&#39;Referer: http://www.nevadareportcard.com/di/main/assessment&#39;</span> -H <span class="st">&#39;X-Requested-With: XMLHttpRequest&#39;</span> -H <span class="st">&#39;Connection: keep-alive&#39;</span> --compressed</code></pre>
+<p>Using <code>%s/ -H/, /g</code>, we get the following</p>
+<pre class="sourceCode r"><code class="sourceCode r">hierarchy_header &lt;-<span class="st"> </span><span class="kw">c</span>(<span class="st">&quot;Cookie: sid=05116CCF8FFBB0648F2C7273580309964292E36AE33840C4FA0594FE6462CA195159FCF65C5A58FFB3DA8E23B57356DF02F16C41CA8040FDF361CAB2A13FDA3D1D821ACDAFEAF60561EB7E717D719D520AE7175ACE93E96595D8846FF2E5DF13AFE51350B46F17D186F9EAC2EA4A368508B36C84191D432D0646081FBC23EDE2&quot;</span>, 
+    <span class="st">&quot;Accept-Encoding: gzip,deflate,sdch&quot;</span>, <span class="st">&quot;Accept-Language: en-US,en;q=0.8&quot;</span>, 
+    <span class="st">&quot;User-Agent: Mozilla/5.0 (X11; Linux i686) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/32.0.1700.102 Safari/537.36&quot;</span>, 
+    <span class="st">&quot;Accept: application/json, text/javascript, */*; q=0.01&quot;</span>, 
+    <span class="st">&quot;Referer: http://www.nevadareportcard.com/di/main/assessment&quot;</span>, 
+    <span class="st">&quot;X-Requested-With: XMLHttpRequest&quot;</span>, <span class="st">&quot;Connection: keep-alive&quot;</span>)</code></pre>
+<pre class="sourceCode r"><code class="sourceCode r">org_chart &lt;-<span class="st"> </span><span class="kw">getURL</span>(<span class="st">&quot;http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/OrganizationHierarchyTree?organization=64825&quot;</span>, 
+    <span class="dt">httpheader =</span> hierarchy_header, <span class="dt">encoding =</span> <span class="st">&quot;gzip&quot;</span>)
+org &lt;-<span class="st"> </span><span class="kw">fromJSON</span>(org_chart, <span class="dt">asText =</span> <span class="ot">TRUE</span>)</code></pre>
+<h3 id="extracting-clark">Extracting Clark</h3>
+<p>We expect that counties will be at the second node of our tree. Verify by visual inspection:</p>
+<pre class="sourceCode r"><code class="sourceCode r"><span class="co"># Check for counties at the second level</span>
+<span class="kw">unlist</span>(<span class="kw">lapply</span>(org$children, function(x) x$organization$name))</code></pre>
+<pre><code>##  [1] &quot;Churchill&quot;      &quot;Clark&quot;          &quot;Douglas&quot;        &quot;Elko&quot;          
+##  [5] &quot;Esmeralda&quot;      &quot;Eureka&quot;         &quot;Humboldt&quot;       &quot;Lander&quot;        
+##  [9] &quot;Lincoln&quot;        &quot;Lyon&quot;           &quot;Mineral&quot;        &quot;Nye&quot;           
+## [13] &quot;Carson City&quot;    &quot;Pershing&quot;       &quot;Storey&quot;         &quot;Washoe&quot;        
+## [17] &quot;White Pine&quot;     &quot;State Charters&quot;</code></pre>
+<pre class="sourceCode r"><code class="sourceCode r">
+<span class="co"># double checking</span>
+org$children[[<span class="dv">2</span>]]$organization$name</code></pre>
+<pre><code>## [1] &quot;Clark&quot;</code></pre>
+<p>So the second node is our target. We can infer the meaning of each type:</p>
+<pre class="sourceCode r"><code class="sourceCode r"><span class="kw">head</span>(<span class="kw">unlist</span>(org), <span class="dt">n =</span> <span class="dv">15</span>)</code></pre>
+<pre><code>##                   organization.id            organization.parent_id 
+##                           &quot;64825&quot;                              &quot;-1&quot; 
+##                 organization.code                 organization.name 
+##                              &quot;00&quot;                           &quot;State&quot; 
+##                 organization.type                 organization.demo 
+##                               &quot;S&quot;                           &quot;FALSE&quot; 
+##                 organization.home          children.organization.id 
+##                            &quot;TRUE&quot;                           &quot;64826&quot; 
+##   children.organization.parent_id        children.organization.code 
+##                           &quot;64825&quot;                              &quot;01&quot; 
+##        children.organization.name        children.organization.type 
+##                       &quot;Churchill&quot;                               &quot;D&quot; 
+##        children.organization.demo        children.organization.home 
+##                           &quot;FALSE&quot;                           &quot;FALSE&quot; 
+## children.children.organization.id 
+##                           &quot;64844&quot;</code></pre>
+<pre class="sourceCode r"><code class="sourceCode r"><span class="kw">tail</span>(<span class="kw">unlist</span>(org), <span class="dt">n =</span> <span class="dv">15</span>)</code></pre>
+<pre><code>##      children.children.organization.home 
+##                                  &quot;FALSE&quot; 
+##        children.children.organization.id 
+##                                  &quot;65526&quot; 
+## children.children.organization.parent_id 
+##                                  &quot;64843&quot; 
+##      children.children.organization.code 
+##                                  &quot;18424&quot; 
+##      children.children.organization.name 
+##           &quot;Honors Academy of Literature&quot; 
+##      children.children.organization.type 
+##                                      &quot;B&quot; 
+##      children.children.organization.demo 
+##                                  &quot;FALSE&quot; 
+##      children.children.organization.home 
+##                                  &quot;FALSE&quot; 
+##        children.children.organization.id 
+##                                  &quot;65527&quot; 
+## children.children.organization.parent_id 
+##                                  &quot;64843&quot; 
+##      children.children.organization.code 
+##                                  &quot;18903&quot; 
+##      children.children.organization.name 
+##                        &quot;Independence HS&quot; 
+##      children.children.organization.type 
+##                                      &quot;B&quot; 
+##      children.children.organization.demo 
+##                                  &quot;FALSE&quot; 
+##      children.children.organization.home 
+##                                  &quot;FALSE&quot;</code></pre>
+<p>Note the first <code>organization.id</code>, <code>64825</code>, which is the same as our <code>GET</code> request. From the rest we can infer that <code>S</code> = State, <code>D</code> = District, and <code>B</code> = School. We assume that <code>A</code> and <code>C</code> are not used. Checking:</p>
+<pre class="sourceCode r"><code class="sourceCode r"><span class="kw">table</span>(<span class="kw">unlist</span>(org)[<span class="kw">grep</span>(<span class="st">&quot;organization.type&quot;</span>, <span class="kw">names</span>(<span class="kw">unlist</span>(org)))])</code></pre>
+<pre><code>## 
+##   B   D   S 
+## 684  18   1</code></pre>
+<p>Checks out. Now we subset CCSD:</p>
+<pre class="sourceCode r"><code class="sourceCode r">clark_org &lt;-<span class="st"> </span>org$children[[<span class="dv">2</span>]]
+<span class="kw">unlist</span>(clark_org$organization)</code></pre>
+<pre><code>##        id parent_id      code      name      type      demo      home 
+##   &quot;64827&quot;   &quot;64825&quot;      &quot;02&quot;   &quot;Clark&quot;       &quot;D&quot;   &quot;FALSE&quot;   &quot;FALSE&quot;</code></pre>
+<p>Finally, we flatten the JSON into a <code>data.table</code></p>
+<pre class="sourceCode r"><code class="sourceCode r"><span class="co"># ldply: split list, apply as.data.table, combine into</span>
+<span class="co"># data.frame</span>
+ccsd.DT &lt;-<span class="st"> </span><span class="kw">ldply</span>(clark_org$children, function(x) <span class="kw">as.data.table</span>(x[<span class="dv">1</span>]$organization))
+ccsd.DT &lt;-<span class="st"> </span><span class="kw">data.table</span>(ccsd.DT, <span class="dt">key =</span> <span class="kw">c</span>(<span class="st">&quot;name&quot;</span>, <span class="st">&quot;id&quot;</span>))</code></pre>
+<h3 id="extracting-subjects">Extracting subjects</h3>
+<p>We now have CCSD isolated, we can pull the info for our Downtown Achieves cohort. While this script can be modified to download and parse AYP reports for an arbitrary subset of Nevada schools, we are limiting ourselves to collecting data for the following schools:</p>
+<pre class="sourceCode r"><code class="sourceCode r">da_list &lt;-<span class="st"> </span><span class="kw">list</span>( 
+    <span class="co"># concatenate with school level</span>
+    <span class="dt">da_es_1 =</span> <span class="kw">paste</span>(<span class="kw">c</span>(<span class="st">&quot;Hollingsworth&quot;</span>, <span class="st">&quot;Crestwood&quot;</span>, <span class="st">&quot;Lake&quot;</span>, <span class="st">&quot;Park&quot;</span>), <span class="st">&quot;ES&quot;</span>, <span class="dt">sep =</span> <span class="st">&quot; &quot;</span>),
+    <span class="dt">da_es_2 =</span> <span class="kw">paste</span>(<span class="kw">c</span>(<span class="st">&quot;Fyfe&quot;</span> , <span class="st">&quot;McWilliams&quot;</span>, <span class="st">&quot;Twin Lakes&quot;</span>),  <span class="st">&quot;ES&quot;</span>, <span class="dt">sep =</span> <span class="st">&quot; &quot;</span>),
+    <span class="dt">da_ms   =</span> <span class="kw">paste</span>(<span class="kw">c</span>(<span class="st">&quot;Fremont&quot;</span>, <span class="st">&quot;Gibson (Robert)&quot;</span>), <span class="st">&quot;MS&quot;</span>, <span class="dt">sep =</span> <span class="st">&quot; &quot;</span>),
+    <span class="dt">da_hs   =</span> <span class="kw">paste</span>(<span class="kw">c</span>(<span class="st">&quot;Valley&quot;</span>, <span class="st">&quot;Western&quot;</span>), <span class="st">&quot;HS&quot;</span>, <span class="dt">sep =</span> <span class="st">&quot; &quot;</span>)
+    )</code></pre>
+<p>Because we may want to consider each pipeline seperately, we also create two character vectors to hold their names:</p>
+<pre class="sourceCode r"><code class="sourceCode r">da_pipeline_1 &lt;-<span class="st"> </span><span class="kw">c</span>(da_list$da_es_1, da_list$da_ms[<span class="dv">1</span>], da_list$da_hs[<span class="dv">1</span>])
+da_pipeline_2 &lt;-<span class="st"> </span><span class="kw">c</span>(da_list$da_es_2, da_list$da_ms[<span class="dv">2</span>], da_list$da_hs[<span class="dv">2</span>])
+
+da_pipeline_1</code></pre>
+<pre><code>## [1] &quot;Hollingsworth ES&quot; &quot;Crestwood ES&quot;     &quot;Lake ES&quot;         
+## [4] &quot;Park ES&quot;          &quot;Fremont MS&quot;       &quot;Valley HS&quot;</code></pre>
+<pre class="sourceCode r"><code class="sourceCode r">da_pipeline_2</code></pre>
+<pre><code>## [1] &quot;Fyfe ES&quot;            &quot;McWilliams ES&quot;      &quot;Twin Lakes ES&quot;     
+## [4] &quot;Gibson (Robert) MS&quot; &quot;Western HS&quot;</code></pre>
+<p>We'll select rows frow our <code>ccsd.DT</code> data table by passing it our list of names:</p>
+<pre class="sourceCode r"><code class="sourceCode r">da.DT &lt;-<span class="st"> </span>ccsd.DT[<span class="kw">unlist</span>(da_list)]</code></pre>
+<table>
+ <thead>
+  <tr>
+   <th> 
+name
+</th>
+   <th> 
+id
+</th>
+   <th> 
+parent_id
+</th>
+   <th> 
+code
+</th>
+   <th> 
+type
+</th>
+   <th> 
+demo
+</th>
+   <th> 
+home
+</th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td> 
+Hollingsworth ES
+</td>
+   <td> 
+65053
+</td>
+   <td> 
+64827
+</td>
+   <td> 
+02273
+</td>
+   <td> 
+B
+</td>
+   <td> 
+FALSE
+</td>
+   <td> 
+FALSE
+</td>
+  </tr>
+  <tr>
+   <td> 
+Crestwood ES
+</td>
+   <td> 
+64985
+</td>
+   <td> 
+64827
+</td>
+   <td> 
+02205
+</td>
+   <td> 
+B
+</td>
+   <td> 
+FALSE
+</td>
+   <td> 
+FALSE
+</td>
+  </tr>
+  <tr>
+   <td> 
+Lake ES
+</td>
+   <td> 
+65017
+</td>
+   <td> 
+64827
+</td>
+   <td> 
+02237
+</td>
+   <td> 
+B
+</td>
+   <td> 
+FALSE
+</td>
+   <td> 
+FALSE
+</td>
+  </tr>
+  <tr>
+   <td> 
+Park ES
+</td>
+   <td> 
+64996
+</td>
+   <td> 
+64827
+</td>
+   <td> 
+02216
+</td>
+   <td> 
+B
+</td>
+   <td> 
+FALSE
+</td>
+   <td> 
+FALSE
+</td>
+  </tr>
+  <tr>
+   <td> 
+Fyfe ES
+</td>
+   <td> 
+65020
+</td>
+   <td> 
+64827
+</td>
+   <td> 
+02240
+</td>
+   <td> 
+B
+</td>
+   <td> 
+FALSE
+</td>
+   <td> 
+FALSE
+</td>
+  </tr>
+  <tr>
+   <td> 
+McWilliams ES
+</td>
+   <td> 
+64998
+</td>
+   <td> 
+64827
+</td>
+   <td> 
+02218
+</td>
+   <td> 
+B
+</td>
+   <td> 
+FALSE
+</td>
+   <td> 
+FALSE
+</td>
+  </tr>
+  <tr>
+   <td> 
+Twin Lakes ES
+</td>
+   <td> 
+65023
+</td>
+   <td> 
+64827
+</td>
+   <td> 
+02243
+</td>
+   <td> 
+B
+</td>
+   <td> 
+FALSE
+</td>
+   <td> 
+FALSE
+</td>
+  </tr>
+  <tr>
+   <td> 
+Fremont MS
+</td>
+   <td> 
+65088
+</td>
+   <td> 
+64827
+</td>
+   <td> 
+02308
+</td>
+   <td> 
+B
+</td>
+   <td> 
+FALSE
+</td>
+   <td> 
+FALSE
+</td>
+  </tr>
+  <tr>
+   <td> 
+Gibson (Robert) MS
+</td>
+   <td> 
+65090
+</td>
+   <td> 
+64827
+</td>
+   <td> 
+02310
+</td>
+   <td> 
+B
+</td>
+   <td> 
+FALSE
+</td>
+   <td> 
+FALSE
+</td>
+  </tr>
+  <tr>
+   <td> 
+Valley HS
+</td>
+   <td> 
+65147
+</td>
+   <td> 
+64827
+</td>
+   <td> 
+02404
+</td>
+   <td> 
+B
+</td>
+   <td> 
+FALSE
+</td>
+   <td> 
+FALSE
+</td>
+  </tr>
+  <tr>
+   <td> 
+Western HS
+</td>
+   <td> 
+65148
+</td>
+   <td> 
+64827
+</td>
+   <td> 
+02405
+</td>
+   <td> 
+B
+</td>
+   <td> 
+FALSE
+</td>
+   <td> 
+FALSE
+</td>
+  </tr>
+</tbody>
+</table>
+
+
+<p>In order to query arbitrary sets of schools we must generate a collection hash</p>
+<pre class="sourceCode r"><code class="sourceCode r">getOrgCollnHash &lt;-<span class="st"> </span>function(ids, hdr, <span class="dt">vb =</span> <span class="ot">FALSE</span>) {
+    r =<span class="st"> </span><span class="kw">dynCurlReader</span>()
+    ids &lt;-<span class="st"> </span><span class="kw">paste0</span>(<span class="st">&quot;=&quot;</span>, <span class="kw">paste</span>(ids, <span class="dt">collapse =</span> <span class="st">&quot;,&quot;</span>))
+    <span class="kw">curlPerform</span>(<span class="dt">postfields =</span> ids, <span class="dt">url =</span> <span class="st">&quot;http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/OrganizationCollectionHash&quot;</span>, 
+        <span class="dt">verbose =</span> vb, <span class="dt">.opts =</span> (<span class="dt">httpheader =</span> hdr), <span class="dt">post =</span> 1L, 
+        <span class="dt">writefunction =</span> r$update)
+    <span class="kw">paste0</span>(<span class="st">&quot;c&quot;</span>, r$<span class="kw">value</span>())
+}</code></pre>
+<p>We run this function against our targeted schools and collect the hash for future use:</p>
+<pre class="sourceCode r"><code class="sourceCode r">csv_header &lt;-<span class="st"> </span><span class="kw">c</span>(<span class="st">&quot;Cookie: sid=BCEA0A1BA4249DF33EC03E7A0269DE101FC829462BD8EE8CEBDDF0C46FC9AFFDBD6C1F56D896E3296DEDD9ECE4CFB1E633EBD9D850D7A68126D9B7264653E8CC282DD2CAB5D364513DCF3E71D4481FF3E5D937BFE72E31A1EBECC6733E798322E34B4838A4265E34D3449D6EEFB52C7C24EED7E6484621603BC2F488B1E8C7AC&quot;</span>, 
+    <span class="st">&quot;Accept-Language: en-US,en;q=0.8&quot;</span>, <span class="st">&quot;User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/32.0.1700.77 Safari/537.36&quot;</span>)
+rg &lt;-<span class="st"> </span><span class="kw">getOrgCollnHash</span>(da.DT$id, csv_header)
+rg</code></pre>
+<pre><code>## [1] &quot;c4939&quot;</code></pre>
+<h3 id="accessing-the-csv-api">Accessing the CSV API</h3>
+<p>Inspection of the URL used to download the CRT scores for another group shows:</p>
+<pre class="sourceCode r"><code class="sourceCode r"><span class="kw">getFormParams</span>(<span class="st">&quot;http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/summaryCSV?report=summary_1&amp;organization=c2272&amp;scope=e5.g3.y10&amp;scores=N_MA,MA_pass,MA_AMO,MA_level,N_RD,RD_pass,RD_AMO,RD_level&quot;</span>)</code></pre>
+<pre><code>##                                                      report 
+##                                                 &quot;summary_1&quot; 
+##                                                organization 
+##                                                     &quot;c2272&quot; 
+##                                                       scope 
+##                                                 &quot;e5.g3.y10&quot; 
+##                                                      scores 
+## &quot;N_MA,MA_pass,MA_AMO,MA_level,N_RD,RD_pass,RD_AMO,RD_level&quot;</code></pre>
+<p>The <code>organization</code> parameter is the hash generated by <code>getOrgCollnHash()</code>. The <code>scope</code> is constructed from:</p>
+<ol style="list-style-type: decimal">
+<li><code>en</code>, where <em>n</em> is 1, 2, 5, or 6,</li>
+<li><code>gn</code>, where <em>n</em> is grade number,</li>
+<li><code>yn</code>, where <em>n</em> is year post NCLB, ranging from 1 (2003) to 10 (2012)</li>
+</ol>
+<p>(These variables, and others, can also be described programmatically via the API)</p>
+<p>The set of scores available for each test vary, and will need to be specified for each one. We include them in our retreival function, but these can also be edited to narrow the query to specific variables.</p>
+<ol style="list-style-type: decimal">
+<li><code>e1</code>, years 3:10; grades 3:8; CRT</li>
+<li><code>e2</code>, year 3:10; grade 11; High School Proficiency Exam</li>
+<li><code>e5</code>, years 3:10, grades 3:8, 11;NAA</li>
+<li><code>e6</code>, years 3:7; grades 3,5; Writing</li>
+</ol>
+<p>We'll retrieve each table with the following function:</p>
+<pre class="sourceCode r"><code class="sourceCode r">getDiCSV &lt;-<span class="st"> </span>function(org, scope, exam, header, <span class="dt">ethnicity =</span> <span class="ot">FALSE</span>, 
+    <span class="dt">gender =</span> <span class="ot">FALSE</span>, <span class="dt">iep =</span> <span class="ot">FALSE</span>, <span class="dt">frl =</span> <span class="ot">FALSE</span>, <span class="dt">filterdata =</span> <span class="ot">NULL</span>, 
+    <span class="dt">rel =</span> <span class="st">&quot;and&quot;</span>) {
+    <span class="co"># report parameter</span>
+    org &lt;-<span class="st"> </span><span class="kw">getOrgCollnHash</span>(org, header)
+    <span class="co"># scores parameter</span>
+    score &lt;-<span class="st"> </span><span class="kw">list</span>(<span class="dt">e1 =</span> <span class="st">&quot;N_MA,MA_SS,MA_pass,MA_AMO,MA_level,N_RD,RD_SS,RD_pass,RD_AMO,RD_level&quot;</span>, 
+        <span class="dt">e2 =</span> <span class="st">&quot;N_MA,MA_SS,MA_pass,MA_AMO,MA_level,N_RD,RD_SS,RD_pass,RD_AMO,RD_level,N_SC,SC_SS,SC_pass,SC_AMO,SC_level,N_WR,WR_pass,WR_AMO,WR_level&quot;</span>, 
+        <span class="dt">e5 =</span> <span class="st">&quot;N_MA,MA_pass,MA_AMO,MA_level,N_RD,RD_pass,RD_AMO,RD_level&quot;</span>, 
+        <span class="dt">e6 =</span> <span class="st">&quot;N_WR,WR_pass,WR_AMO,WR_level&quot;</span>)
+    target &lt;-<span class="st"> </span><span class="kw">paste0</span>(<span class="st">&quot;http://www.nevadareportcard.com/DIWAPI-NVReportCard/api/summaryCSV?report=summary_1&amp;organization=&quot;</span>, 
+        org, <span class="st">&quot;&amp;scope=&quot;</span>, scope, <span class="st">&quot;&amp;scores=&quot;</span>, score[[exam]])
+    
+    <span class="co"># inelegant disaggregation selection</span>
+    subgroup &lt;-<span class="st"> &quot;&quot;</span>
+    if (ethnicity ==<span class="st"> </span><span class="ot">TRUE</span>) 
+        subgroup &lt;-<span class="st"> </span><span class="kw">paste0</span>(<span class="st">&quot;ethnicity,&quot;</span>, subgroup)
+    if (gender ==<span class="st"> </span><span class="ot">TRUE</span>) 
+        subgroup &lt;-<span class="st"> </span><span class="kw">paste0</span>(<span class="st">&quot;gender,&quot;</span>, subgroup)
+    if (iep ==<span class="st"> </span><span class="ot">TRUE</span>) 
+        subgroup &lt;-<span class="st"> </span><span class="kw">paste0</span>(<span class="st">&quot;iep,&quot;</span>, subgroup)
+    if (frl ==<span class="st"> </span><span class="ot">TRUE</span>) 
+        subgroup &lt;-<span class="st"> </span><span class="kw">paste0</span>(<span class="st">&quot;frl,&quot;</span>, subgroup)
+    
+    <span class="co"># if any of the above, concatenate with target</span>
+    if (subgroup !=<span class="st"> &quot;&quot;</span>) {
+        target &lt;-<span class="st"> </span><span class="kw">paste0</span>(target, <span class="st">&quot;&amp;subgroups=&quot;</span>, <span class="kw">sub</span>(<span class="st">&quot;,$&quot;</span>, 
+            <span class="st">&quot;&quot;</span>, subgroup), <span class="st">&quot;&amp;filterrelation=and&quot;</span>)
+    }
+    
+    <span class="co"># filtering on subpopulation, but by passing a string</span>
+    <span class="co"># argument instead if present, subgroups above are</span>
+    <span class="co"># ignored</span>
+    if (<span class="kw">is.character</span>(filterdata)) {
+        
+        <span class="co"># convert .  getFilterKeys &lt;- function(filterdatum) { .</span>
+        <span class="co"># # split and combine .  filterkey &lt;-</span>
+        <span class="co"># strsplit(filterdatum, split = &#39;.&#39;) .  paste(filterkey,</span>
+        <span class="co"># collapse = &#39;_&#39;) .  }</span>
+        filterkeys &lt;-<span class="st"> </span><span class="kw">gsub</span>(<span class="st">&quot;.&quot;</span>, <span class="st">&quot;_&quot;</span>, filterdata, <span class="dt">exact =</span> <span class="ot">TRUE</span>)
+        
+        target &lt;-<span class="st"> </span><span class="kw">paste0</span>(target, <span class="st">&quot;&amp;filterkey=&quot;</span>, filterkeys, 
+            <span class="st">&quot;&amp;filterdata=&quot;</span>, filterdata, <span class="st">&quot;&amp;filterrelation=&quot;</span>, 
+            rel)
+    }
+    <span class="co"># target make it so</span>
+    resultsText &lt;-<span class="st"> </span><span class="kw">getURL</span>(target)
+    
+    <span class="co"># create temporary connection from results and return</span>
+    <span class="co"># data.table</span>
+    <span class="kw">data.table</span>(<span class="kw">read.csv</span>(<span class="dt">text =</span> resultsText))
+}</code></pre>
+<p>Now we'll download the results of the Criteron Referenced Test (exam <code>e1</code>) for Grade 3 (<code>g3</code>), and years 2007 (<code>y3</code>) through 2012 (<code>y10</code>):</p>
+<pre class="sourceCode r"><code class="sourceCode r">scopestr &lt;-<span class="st"> </span><span class="kw">paste</span>(<span class="kw">c</span>(<span class="st">&quot;e1&quot;</span>, <span class="st">&quot;g3&quot;</span>, <span class="kw">paste0</span>(<span class="st">&quot;y&quot;</span>, <span class="dv">3</span>:<span class="dv">10</span>)), <span class="dt">collapse =</span> <span class="st">&quot;.&quot;</span>)
+da.crt.g3 &lt;-<span class="st"> </span><span class="kw">getDiCSV</span>(da.DT$id, scopestr, <span class="st">&quot;e1&quot;</span>, csv_header)</code></pre>
+Printing the first ten rows:
+<script type="text/javascript" charset="utf-8">
+  $(document).ready(function() {
+    $('#da_table').dataTable();
+    } );
+</script>
+<table id="da_table">
+ <thead>
+  <tr>
+   <th> 
+Group
+</th>
+   <th> 
+Year
+</th>
+   <th> 
+Grade
+</th>
+   <th> 
+Number.Enrolled
+</th>
+   <th> 
+Mathematics...Number.Tested
+</th>
+   <th> 
+Mathematics...Mean.Scale.Score
+</th>
+   <th> 
+Mathematics.....Proficient
+</th>
+   <th> 
+Mathematics.....Above.AMO
+</th>
+   <th> 
+Mathematics...Emergent.Developing
+</th>
+   <th> 
+Mathematics...Approaches.Standard
+</th>
+   <th> 
+Mathematics...Meets.Standard
+</th>
+   <th> 
+Mathematics...Exceeds.Standard
+</th>
+   <th> 
+Reading...Number.Tested
+</th>
+   <th> 
+Reading...Mean.Scale.Score
+</th>
+   <th> 
+Reading.....Proficient
+</th>
+   <th> 
+Reading.....Above.AMO
+</th>
+   <th> 
+Reading...Emergent.Developing
+</th>
+   <th> 
+Reading...Approaches.Standard
+</th>
+   <th> 
+Reading...Meets.Standard
+</th>
+   <th> 
+Reading...Exceeds.Standard
+</th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td> 
+Crestwood ES
+</td>
+   <td> 
+2007-2008
+</td>
+   <td> 
+3
+</td>
+   <td> 
+126
+</td>
+   <td> 
+126
+</td>
+   <td> 
+316.8
+</td>
+   <td> 
+64.3
+</td>
+   <td>   
+8.0
+</td>
+   <td>  
+7.1
+</td>
+   <td> 
+28.6
+</td>
+   <td> 
+35.7
+</td>
+   <td> 
+28.6
+</td>
+   <td> 
+126
+</td>
+   <td> 
+298.0
+</td>
+   <td> 
+54.0
+</td>
+   <td>   
+2.3
+</td>
+   <td>  
+8.7
+</td>
+   <td> 
+37.3
+</td>
+   <td> 
+29.4
+</td>
+   <td> 
+24.6
+</td>
+  </tr>
+  <tr>
+   <td> 
+Crestwood ES
+</td>
+   <td> 
+2008-2009
+</td>
+   <td> 
+3
+</td>
+   <td> 
+114
+</td>
+   <td> 
+114
+</td>
+   <td> 
+312.0
+</td>
+   <td> 
+52.6
+</td>
+   <td>  
+-3.7
+</td>
+   <td>  
+6.1
+</td>
+   <td> 
+41.2
+</td>
+   <td> 
+23.7
+</td>
+   <td> 
+28.9
+</td>
+   <td> 
+114
+</td>
+   <td> 
+302.4
+</td>
+   <td> 
+57.0
+</td>
+   <td>   
+5.3
+</td>
+   <td>  
+4.4
+</td>
+   <td> 
+38.6
+</td>
+   <td> 
+40.4
+</td>
+   <td> 
+16.7
+</td>
+  </tr>
+  <tr>
+   <td> 
+Crestwood ES
+</td>
+   <td> 
+2009-2010
+</td>
+   <td> 
+3
+</td>
+   <td> 
+108
+</td>
+   <td> 
+108
+</td>
+   <td> 
+305.0
+</td>
+   <td> 
+53.7
+</td>
+   <td> 
+-12.2
+</td>
+   <td> 
+16.7
+</td>
+   <td> 
+29.6
+</td>
+   <td> 
+32.4
+</td>
+   <td> 
+21.3
+</td>
+   <td> 
+108
+</td>
+   <td> 
+296.1
+</td>
+   <td> 
+50.0
+</td>
+   <td> 
+-13.8
+</td>
+   <td>  
+4.6
+</td>
+   <td> 
+45.4
+</td>
+   <td> 
+34.3
+</td>
+   <td> 
+15.7
+</td>
+  </tr>
+  <tr>
+   <td> 
+Crestwood ES
+</td>
+   <td> 
+2010-2011
+</td>
+   <td> 
+3
+</td>
+   <td> 
+112
+</td>
+   <td> 
+112
+</td>
+   <td> 
+345.1
+</td>
+   <td> 
+80.4
+</td>
+   <td>  
+14.5
+</td>
+   <td>  
+9.8
+</td>
+   <td>  
+9.8
+</td>
+   <td> 
+37.5
+</td>
+   <td> 
+42.9
+</td>
+   <td> 
+112
+</td>
+   <td> 
+301.0
+</td>
+   <td> 
+57.1
+</td>
+   <td>  
+-6.7
+</td>
+   <td> 
+25.0
+</td>
+   <td> 
+17.9
+</td>
+   <td> 
+36.6
+</td>
+   <td> 
+20.5
+</td>
+  </tr>
+  <tr>
+   <td> 
+Crestwood ES
+</td>
+   <td> 
+2011-2012
+</td>
+   <td> 
+3
+</td>
+   <td> 
+120
+</td>
+   <td> 
+120
+</td>
+   <td> 
+322.4
+</td>
+   <td> 
+70.8
+</td>
+   <td>  
+-2.7
+</td>
+   <td>  
+8.3
+</td>
+   <td> 
+20.8
+</td>
+   <td> 
+42.5
+</td>
+   <td> 
+28.3
+</td>
+   <td> 
+120
+</td>
+   <td> 
+294.1
+</td>
+   <td> 
+48.3
+</td>
+   <td> 
+-17.5
+</td>
+   <td> 
+20.8
+</td>
+   <td> 
+30.8
+</td>
+   <td> 
+34.2
+</td>
+   <td> 
+14.2
+</td>
+  </tr>
+  <tr>
+   <td> 
+Crestwood ES
+</td>
+   <td> 
+2012-2013
+</td>
+   <td> 
+3
+</td>
+   <td> 
+104
+</td>
+   <td> 
+104
+</td>
+   <td> 
+314.3
+</td>
+   <td> 
+57.7
+</td>
+   <td> 
+-13.9
+</td>
+   <td> 
+14.4
+</td>
+   <td> 
+27.9
+</td>
+   <td> 
+29.8
+</td>
+   <td> 
+27.9
+</td>
+   <td> 
+104
+</td>
+   <td> 
+289.0
+</td>
+   <td> 
+41.3
+</td>
+   <td> 
+-26.1
+</td>
+   <td> 
+30.8
+</td>
+   <td> 
+27.9
+</td>
+   <td> 
+24.0
+</td>
+   <td> 
+17.3
+</td>
+  </tr>
+</tbody>
+</table>
+
+
+<p>Try again, but this time disaggregate based upon ethnicity:</p>
+<pre class="sourceCode r"><code class="sourceCode r">da.crt.g3.e &lt;-<span class="st"> </span><span class="kw">getDiCSV</span>(da.DT$id, scopestr, <span class="st">&quot;e1&quot;</span>, csv_header, 
+    <span class="dt">ethnicity =</span> <span class="ot">TRUE</span>)</code></pre>
+<p>The first 10 rows:</p>
+<table>
+ <thead>
+  <tr>
+   <th> 
+Group
+</th>
+   <th> 
+Year
+</th>
+   <th> 
+Grade
+</th>
+   <th> 
+Number.Enrolled
+</th>
+   <th> 
+Mathematics...Number.Tested
+</th>
+   <th> 
+Mathematics...Mean.Scale.Score
+</th>
+   <th> 
+Mathematics.....Proficient
+</th>
+   <th> 
+Mathematics.....Above.AMO
+</th>
+   <th> 
+Mathematics...Emergent.Developing
+</th>
+   <th> 
+Mathematics...Approaches.Standard
+</th>
+   <th> 
+Mathematics...Meets.Standard
+</th>
+   <th> 
+Mathematics...Exceeds.Standard
+</th>
+   <th> 
+Reading...Number.Tested
+</th>
+   <th> 
+Reading...Mean.Scale.Score
+</th>
+   <th> 
+Reading.....Proficient
+</th>
+   <th> 
+Reading.....Above.AMO
+</th>
+   <th> 
+Reading...Emergent.Developing
+</th>
+   <th> 
+Reading...Approaches.Standard
+</th>
+   <th> 
+Reading...Meets.Standard
+</th>
+   <th> 
+Reading...Exceeds.Standard
+</th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td> 
+Crestwood ES
+</td>
+   <td> 
+2007-2008
+</td>
+   <td> 
+3
+</td>
+   <td> 
+126
+</td>
+   <td> 
+126
+</td>
+   <td> 
+316.8
+</td>
+   <td> 
+64.3
+</td>
+   <td> 
+8.0
+</td>
+   <td> 
+7.1
+</td>
+   <td> 
+28.6
+</td>
+   <td> 
+35.7
+</td>
+   <td> 
+28.6
+</td>
+   <td> 
+126
+</td>
+   <td> 
+298.0
+</td>
+   <td> 
+54.0
+</td>
+   <td> 
+2.3
+</td>
+   <td> 
+8.7
+</td>
+   <td> 
+37.3
+</td>
+   <td> 
+29.4
+</td>
+   <td> 
+24.6
+</td>
+  </tr>
+  <tr>
+   <td> 
+Black
+</td>
+   <td> 
+2007-2008
+</td>
+   <td> 
+3
+</td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+  </tr>
+  <tr>
+   <td> 
+Hispanic
+</td>
+   <td> 
+2007-2008
+</td>
+   <td> 
+3
+</td>
+   <td> 
+105
+</td>
+   <td> 
+105
+</td>
+   <td> 
+312.8
+</td>
+   <td> 
+61.9
+</td>
+   <td> 
+5.6
+</td>
+   <td> 
+7.6
+</td>
+   <td> 
+30.5
+</td>
+   <td> 
+38.1
+</td>
+   <td> 
+23.8
+</td>
+   <td> 
+105
+</td>
+   <td> 
+292.4
+</td>
+   <td> 
+50.5
+</td>
+   <td> 
+-1.2
+</td>
+   <td> 
+9.5
+</td>
+   <td> 
+40.0
+</td>
+   <td> 
+29.5
+</td>
+   <td> 
+21.0
+</td>
+  </tr>
+  <tr>
+   <td> 
+White
+</td>
+   <td> 
+2007-2008
+</td>
+   <td> 
+3
+</td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+  </tr>
+  <tr>
+   <td> 
+Asian
+</td>
+   <td> 
+2007-2008
+</td>
+   <td> 
+3
+</td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+   <td> 
+<ul>
+<li></td>
+  </tr>
+  <tr>
+   <td> 
+Crestwood ES
+</td>
+   <td> 
+2008-2009
+</td>
+   <td> 
+3
+</td>
+   <td> 
+114
+</td>
+   <td> 
+114
+</td>
+   <td> 
+312.0
+</td>
+   <td> 
+52.6
+</td>
+   <td> 
+-3.7
+</td>
+   <td> 
+6.1
+</td>
+   <td> 
+41.2
+</td>
+   <td> 
+23.7
+</td>
+   <td> 
+28.9
+</td>
+   <td> 
+114
+</td>
+   <td> 
+302.4
+</td>
+   <td> 
+57.0
+</td>
+   <td> 
+5.3
+</td>
+   <td> 
+4.4
+</td>
+   <td> 
+38.6
+</td>
+   <td> 
+40.4
+</td>
+   <td> 
+16.7
+</td>
+  </tr>
+</tbody>
+</table>
+
+</li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul>
+<p>However, disaggregation has its pitfalls, as test results are supressed where <span class="math"><em>n</em> ≤ 20</span></p>
+<h3 id="accessing-demographic-and-profile-data">Accessing demographic and profile data</h3>
+<p>Test scores, in isolation, are removed from their context and are of limited utility.</p>
